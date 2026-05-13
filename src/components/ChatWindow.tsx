@@ -96,6 +96,8 @@ export default function ChatWindow({ character }: { character: Character }) {
   const [showMed, setShowMed]     = useState(false);
   const [apiError, setApiError]   = useState('');
   const [voices, setVoices]       = useState<SpeechSynthesisVoice[]>([]);
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const audioUnlockedRef = useRef(false);
 
   const recogRef       = useRef<SRInstance | null>(null);
   const ttsQueue       = useRef<string[]>([]);
@@ -114,6 +116,27 @@ export default function ChatWindow({ character }: { character: Character }) {
   useEffect(() => { voiceOnRef.current = voiceOn; }, [voiceOn]);
   useEffect(() => { listeningRef.current = listening; }, [listening]);
   useEffect(() => { streamingRef.current = streaming; }, [streaming]);
+
+  // ── iOS audio unlock ─────────────────────────────────────────────────────
+  // iOS blocks all audio until a user gesture. Fire a silent utterance on
+  // first touch so subsequent TTS calls are allowed.
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
+    const unlock = () => {
+      if (audioUnlockedRef.current) return;
+      audioUnlockedRef.current = true;
+      setAudioUnlocked(true);
+      const silent = new SpeechSynthesisUtterance('');
+      silent.volume = 0;
+      window.speechSynthesis.speak(silent);
+    };
+    window.addEventListener('touchstart', unlock, { once: true });
+    window.addEventListener('click', unlock, { once: true });
+    return () => {
+      window.removeEventListener('touchstart', unlock);
+      window.removeEventListener('click', unlock);
+    };
+  }, []);
 
   // ── Load TTS voices ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -412,10 +435,25 @@ export default function ChatWindow({ character }: { character: Character }) {
     idle: '', talking: `${cfg.name} 正在說話`, listening: '正在聆聽…',
   };
 
+  const isIOS = typeof navigator !== 'undefined' &&
+    /iPad|iPhone|iPod/.test(navigator.userAgent);
+
   return (
     <div className="relative h-screen w-screen overflow-hidden">
 
       <CharacterAvatar character={character} state={avatar} className="absolute inset-0" />
+
+      {/* iOS audio unlock prompt */}
+      {isIOS && !audioUnlocked && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(8,10,28,0.82)', backdropFilter: 'blur(8px)' }}>
+          <div className="text-center px-8">
+            <div className="text-5xl mb-4">🔊</div>
+            <p className="text-white text-lg font-semibold mb-2">點一下開始</p>
+            <p className="text-white/60 text-sm">iOS 需要你先點擊才能播放聲音</p>
+          </div>
+        </div>
+      )}
       <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-black/35 pointer-events-none" />
 
       {apiError && (
