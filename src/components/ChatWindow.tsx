@@ -315,8 +315,8 @@ export default function ChatWindow({ character }: { character: Character }) {
   }
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (panelOpen) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, panelOpen]);
 
   // ── Log ──────────────────────────────────────────────────────────────────
   async function logConv(msgs: Message[]) {
