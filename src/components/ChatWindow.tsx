@@ -144,7 +144,8 @@ export default function ChatWindow({ character }: { character: Character }) {
     const lang = 'zh-TW';
     const src = `/api/tts?text=${encodeURIComponent(text)}&lang=${lang}`;
     const audio = new Audio(src);
-    audio.playbackRate = character === 'leo' ? 1.05 : 0.92;
+    audio.playbackRate = character === 'leo' ? 1.3 : 1.1;
+    audio.setAttribute('playsinline', '');
     currentAudio.current = audio;
 
     audio.onplay  = () => setAvatar('talking');
@@ -197,13 +198,28 @@ export default function ChatWindow({ character }: { character: Character }) {
   function startListening() {
     const r = recogRef.current;
     if (!r || listeningRef.current) return;
+
+    // Ensure any playing audio is stopped first
+    if (currentAudio.current) {
+      currentAudio.current.pause();
+      currentAudio.current = null;
+      ttsBusy.current = false;
+    }
+
     recognizedText.current = '';
-    try {
-      r.start();
-      setListening(true);
-      listeningRef.current = true;
-      setAvatar('listening');
-    } catch { /* already running */ }
+    const doStart = () => {
+      try {
+        r.start();
+        setListening(true);
+        listeningRef.current = true;
+        setAvatar('listening');
+      } catch { /* already running */ }
+    };
+
+    // iOS needs extra time for audio session to release after playback
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    if (isIOS) setTimeout(doStart, 350);
+    else doStart();
   }
 
   function stopListening() {
@@ -259,11 +275,15 @@ export default function ChatWindow({ character }: { character: Character }) {
       }
     };
 
-    rec.onerror = () => {
+    rec.onerror = (e: Event) => {
       setListening(false);
       listeningRef.current = false;
       setAvatar('idle');
-      if (voiceOnRef.current) scheduleRestart(600);
+      const errCode = (e as Event & { error?: string }).error;
+      if (errCode === 'not-allowed') return; // mic permission denied, don't retry
+      // audio-capture means audio session still busy — wait longer on iOS
+      const delay = errCode === 'audio-capture' ? 1200 : 600;
+      if (voiceOnRef.current) scheduleRestart(delay);
     };
 
     recogRef.current = rec;
@@ -513,12 +533,6 @@ export default function ChatWindow({ character }: { character: Character }) {
       </div>
 
       {/* Slide tab */}
-      {!panelOpen && (
-        <button onClick={() => setPanel(true)}
-          className="absolute right-0 top-1/2 -translate-y-1/2 z-20 w-8 h-20 bg-black/30 backdrop-blur rounded-l-xl flex items-center justify-center text-white/40 hover:text-white hover:bg-black/50 transition-all">
-          <ChevronLeft size={14} />
-        </button>
-      )}
 
       {/* Chat panel */}
       <div className={`absolute top-0 right-0 h-full z-30 flex transition-transform duration-300 ease-out
