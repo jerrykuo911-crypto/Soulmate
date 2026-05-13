@@ -95,13 +95,13 @@ export default function ChatWindow({ character }: { character: Character }) {
   const [speechOK, setSpeechOK]   = useState(false);
   const [showMed, setShowMed]     = useState(false);
   const [apiError, setApiError]   = useState('');
-  const [voices, setVoices]       = useState<SpeechSynthesisVoice[]>([]);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const audioUnlockedRef = useRef(false);
 
   const recogRef       = useRef<SRInstance | null>(null);
   const ttsQueue       = useRef<string[]>([]);
   const ttsBusy        = useRef(false);
+  const currentAudio   = useRef<HTMLAudioElement | null>(null);
   const sentBuf        = useRef('');
   const voiceOnRef     = useRef(true);
   const listeningRef   = useRef(false);
@@ -117,18 +117,15 @@ export default function ChatWindow({ character }: { character: Character }) {
   useEffect(() => { listeningRef.current = listening; }, [listening]);
   useEffect(() => { streamingRef.current = streaming; }, [streaming]);
 
-  // ── iOS audio unlock ─────────────────────────────────────────────────────
-  // iOS blocks all audio until a user gesture. Fire a silent utterance on
-  // first touch so subsequent TTS calls are allowed.
+  // ── iOS audio unlock via silent Audio element ────────────────────────────
   useEffect(() => {
-    if (!('speechSynthesis' in window)) return;
     const unlock = () => {
       if (audioUnlockedRef.current) return;
       audioUnlockedRef.current = true;
       setAudioUnlocked(true);
-      const silent = new SpeechSynthesisUtterance('');
-      silent.volume = 0;
-      window.speechSynthesis.speak(silent);
+      // Play a silent audio blob to unlock HTMLAudioElement on iOS
+      const silence = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
+      silence.play().catch(() => {});
     };
     window.addEventListener('touchstart', unlock, { once: true });
     window.addEventListener('click', unlock, { once: true });
@@ -138,58 +135,53 @@ export default function ChatWindow({ character }: { character: Character }) {
     };
   }, []);
 
-  // ── Load TTS voices ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!('speechSynthesis' in window)) return;
-    const load = () => {
-      const v = window.speechSynthesis.getVoices();
-      if (v.length) setVoices(v);
-    };
-    load();
-    window.speechSynthesis.onvoiceschanged = load;
-    return () => { window.speechSynthesis.onvoiceschanged = null; };
-  }, []);
-
-  // ── TTS ──────────────────────────────────────────────────────────────────
+  // ── TTS via server-side audio (works on iOS) ─────────────────────────────
   const drainTTS = useCallback(() => {
     if (ttsBusy.current || ttsQueue.current.length === 0) return;
-    const next = ttsQueue.current.shift()!;
+    const text = ttsQueue.current.shift()!;
     ttsBusy.current = true;
 
-    const utt = new SpeechSynthesisUtterance(next);
-    utt.lang = 'zh-TW';
-    utt.rate  = character === 'leo' ? 1.08 : 0.92;
-    utt.pitch = character === 'leo' ? 0.35 : 0.90;
+    const lang = 'zh-TW';
+    const src = `/api/tts?text=${encodeURIComponent(text)}&lang=${lang}`;
+    const audio = new Audio(src);
+    audio.playbackRate = character === 'leo' ? 1.05 : 0.92;
+    currentAudio.current = audio;
 
-    const picked = pickVoice(character, voices);
-    if (picked) utt.voice = picked;
-
-    utt.onstart = () => setAvatar('talking');
-    utt.onend = () => {
+    audio.onplay  = () => setAvatar('talking');
+    audio.onended = () => {
       ttsBusy.current = false;
+      currentAudio.current = null;
       if (ttsQueue.current.length > 0) {
         drainTTS();
       } else {
         setAvatar('idle');
-        // Auto-resume listening after AI finishes speaking
-        if (voiceOnRef.current && !listeningRef.current) {
-          scheduleRestart(300);
-        }
+        if (voiceOnRef.current && !listeningRef.current) scheduleRestart(300);
       }
     };
-    utt.onerror = () => { ttsBusy.current = false; drainTTS(); };
-    window.speechSynthesis.speak(utt);
-  }, [character, voices]);
+    audio.onerror = () => {
+      ttsBusy.current = false;
+      currentAudio.current = null;
+      drainTTS();
+    };
+    audio.play().catch(() => {
+      ttsBusy.current = false;
+      currentAudio.current = null;
+    });
+  }, [character]);
 
   function enqueueTTS(text: string) {
-    if (!voiceOnRef.current || !('speechSynthesis' in window)) return;
+    if (!voiceOnRef.current) return;
     ttsQueue.current.push(text);
     drainTTS();
   }
 
   function stopTTS() {
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-    ttsQueue.current = []; ttsBusy.current = false;
+    ttsQueue.current = [];
+    ttsBusy.current = false;
+    if (currentAudio.current) {
+      currentAudio.current.pause();
+      currentAudio.current = null;
+    }
   }
 
   // ── Speech recognition ───────────────────────────────────────────────────
@@ -283,9 +275,9 @@ export default function ChatWindow({ character }: { character: Character }) {
       voiceOnRef.current = false;
       if (restartTimer.current) clearTimeout(restartTimer.current);
       try { rec.abort(); } catch { /* */ }
-      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
       ttsQueue.current = [];
       ttsBusy.current = false;
+      if (currentAudio.current) { currentAudio.current.pause(); currentAudio.current = null; }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
