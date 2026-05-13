@@ -144,7 +144,7 @@ export default function ChatWindow({ character }: { character: Character }) {
     const lang = 'zh-TW';
     const src = `/api/tts?text=${encodeURIComponent(text)}&lang=${lang}`;
     const audio = new Audio(src);
-    audio.playbackRate = character === 'leo' ? 1.3 : 1.1;
+    audio.playbackRate = character === 'leo' ? 1.08 : 0.92;
     audio.setAttribute('playsinline', '');
     currentAudio.current = audio;
 
