@@ -141,33 +141,50 @@ export default function ChatWindow({ character }: { character: Character }) {
     const text = ttsQueue.current.shift()!;
     ttsBusy.current = true;
 
-    const lang = 'zh-TW';
-    const src = `/api/tts?text=${encodeURIComponent(text)}&lang=${lang}`;
-    const audio = new Audio(src);
-    audio.playbackRate = character === 'leo' ? 1.08 : 0.92;
-    audio.setAttribute('playsinline', '');
-    currentAudio.current = audio;
+    let retries = 0;
+    const attempt = () => {
+      // Cache-bust so retries don't hit a cached error response
+      const src = `/api/tts?text=${encodeURIComponent(text)}&lang=zh-TW&_=${Date.now()}`;
+      const audio = new Audio(src);
+      audio.playbackRate = character === 'leo' ? 1.5 : 1.3;
+      audio.setAttribute('playsinline', '');
+      currentAudio.current = audio;
 
-    audio.onplay  = () => setAvatar('talking');
-    audio.onended = () => {
-      ttsBusy.current = false;
-      currentAudio.current = null;
-      if (ttsQueue.current.length > 0) {
+      // Safety timeout: if nothing plays within 6s, skip and continue
+      const safety = setTimeout(() => {
+        audio.onplay = audio.onended = audio.onerror = null;
+        audio.pause();
+        currentAudio.current = null;
+        ttsBusy.current = false;
         drainTTS();
-      } else {
-        setAvatar('idle');
-        if (voiceOnRef.current && !listeningRef.current) scheduleRestart(300);
-      }
+      }, 6000);
+
+      audio.onplay = () => { clearTimeout(safety); setAvatar('talking'); };
+
+      audio.onended = () => {
+        clearTimeout(safety);
+        ttsBusy.current = false;
+        currentAudio.current = null;
+        if (ttsQueue.current.length > 0) drainTTS();
+        else {
+          setAvatar('idle');
+          if (voiceOnRef.current && !listeningRef.current) scheduleRestart(300);
+        }
+      };
+
+      const onFail = () => {
+        clearTimeout(safety);
+        currentAudio.current = null;
+        if (retries < 1) { retries++; setTimeout(attempt, 400); return; }
+        ttsBusy.current = false;
+        drainTTS(); // skip broken chunk, keep queue going
+      };
+
+      audio.onerror = onFail;
+      audio.play().catch(onFail);
     };
-    audio.onerror = () => {
-      ttsBusy.current = false;
-      currentAudio.current = null;
-      drainTTS();
-    };
-    audio.play().catch(() => {
-      ttsBusy.current = false;
-      currentAudio.current = null;
-    });
+
+    attempt();
   }, [character]);
 
   function enqueueTTS(text: string) {

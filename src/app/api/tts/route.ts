@@ -15,9 +15,10 @@ export async function GET(req: NextRequest) {
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Referer': 'https://translate.google.com/',
     },
-  });
+    signal: AbortSignal.timeout(5000),
+  }).catch(() => null);
 
-  if (!res.ok) return new NextResponse('TTS fetch failed', { status: 502 });
+  if (!res || !res.ok) return new NextResponse('TTS fetch failed', { status: 502 });
 
   const buffer = await res.arrayBuffer();
   return new NextResponse(buffer, {
